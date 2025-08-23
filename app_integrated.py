@@ -9162,7 +9162,7 @@ def main():
                     ticker_info_dict[ticker] = yf_ticker.info
                 
                 # ファンダメンタルデータ（対応銘柄のみ）
-                fund_file_path = f'/Users/utsueito/stock_analysis_app/cleaned_financials_{ticker.replace(".T", "")}.csv'
+                fund_file_path = f'cleaned_financials_{ticker.replace(".T", "")}.csv'
                 if os.path.exists(fund_file_path):
                     try:
                         fund_data = pd.read_csv(fund_file_path, index_col=0, parse_dates=True)
