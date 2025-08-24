@@ -11,6 +11,7 @@ import hashlib
 import itertools
 import warnings
 import json
+import pytz
 
 # 警告を非表示にする
 warnings.filterwarnings('ignore', category=FutureWarning, module='yfinance')
@@ -107,11 +108,15 @@ def save_shared_memo(ticker, memo_type, memo_content, author):
     if ticker not in memo_data["shared"]:
         memo_data["shared"][ticker] = {}
     
+    # 日本時間を取得
+    jst = pytz.timezone('Asia/Tokyo')
+    current_time_jst = datetime.now(jst)
+    
     # メモの内容と作成者、更新日時を保存
     memo_data["shared"][ticker][memo_type] = {
         "content": memo_content,
         "author": author,
-        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        "updated_at": current_time_jst.strftime("%Y-%m-%d %H:%M:%S JST")
     }
     
     save_memo_data(memo_data)
@@ -5546,6 +5551,32 @@ def get_valuation_metrics(ticker_info, fundamental_data):
     
     return metrics
 
+def calculate_trend_line(x_data, y_data):
+    """回帰分析によるトレンドラインを計算（numpy使用）"""
+    try:
+        import numpy as np
+        
+        # 有効なデータのみを使用
+        valid_indices = ~(pd.isna(y_data) | np.isinf(y_data))
+        if valid_indices.sum() < 2:
+            return None, None
+        
+        x_numeric = np.arange(len(x_data))[valid_indices]
+        y_numeric = np.array(y_data)[valid_indices]
+        
+        # numpy の polyfit を使用して線形回帰
+        coefficients = np.polyfit(x_numeric, y_numeric, 1)
+        slope, intercept = coefficients
+        
+        # トレンドライン値を計算
+        trend_x = np.arange(len(x_data))
+        trend_y = slope * trend_x + intercept
+        
+        return trend_x, trend_y
+    except Exception as e:
+        print(f"トレンドライン計算エラー: {e}")
+        return None, None
+
 def create_integrated_analysis(ticker, stock_data, ticker_info, fundamental_data=None):
     """統合分析ページ"""
     company_name = get_japanese_company_name(ticker, ticker_info)
@@ -6338,6 +6369,7 @@ def create_integrated_analysis(ticker, stock_data, ticker_info, fundamental_data
         
         with col_forecast1:
             st.write("**📊 実績値（最新期）**")
+            st.caption("※以下は過去の実績データです")
             st.write(f"• 売上高: {latest_revenue:.1f}億円")
             st.write(f"• 営業利益: {latest_profit:.1f}億円")
             if latest_revenue > 0:
@@ -6345,7 +6377,8 @@ def create_integrated_analysis(ticker, stock_data, ticker_info, fundamental_data
                 st.write(f"• 営業利益率: {current_margin:.1f}%")
         
         with col_forecast2:
-            st.write("**🔮 予想値入力**")
+            st.write("**🔮 予想値入力（会社計画・アナリスト予想等）**")
+            st.caption("※以下は将来の予想・計画値を入力してください")
             
             # セッションステートで予想値を管理
             forecast_key_revenue = f"forecast_revenue_{ticker}"
@@ -6496,8 +6529,19 @@ def create_integrated_analysis(ticker, stock_data, ticker_info, fundamental_data
                     ))
                 
                 fig.update_layout(
-                    title='財務指標の推移',
+                    title='📊 財務指標の推移（実績データ）',
                     yaxis_title='金額 (億円)',
+                    annotations=[
+                        dict(
+                            x=0.5,
+                            y=1.05,
+                            xref="paper",
+                            yref="paper",
+                            text="※このグラフは過去の実績データのみを表示しています",
+                            showarrow=False,
+                            font=dict(size=10, color="gray")
+                        )
+                    ],
                     height=400
                 )
                 st.plotly_chart(fig, use_container_width=True)
@@ -6961,7 +7005,8 @@ def render_summary_tab(ticker, stock_data, ticker_info, fundamental_data):
     
     # バリュエーション指標セクション
     with st.container(border=True):
-        st.subheader('📊 バリュエーション指標')
+        st.subheader('📊 バリュエーション指標（現在の実績ベース）')
+        st.caption("※以下の指標は最新の実績財務データおよび現在株価に基づいて計算されています")
         
         # バリュエーション指標を取得
         valuation_metrics = get_valuation_metrics(ticker_info, fundamental_data)
@@ -7159,11 +7204,119 @@ def render_summary_tab(ticker, stock_data, ticker_info, fundamental_data):
                         f"¥{prediction_997['lower_bound']:,.0f} - ¥{prediction_997['upper_bound']:,.0f}",
                         help="99.7%の確率でこの範囲内"
                     )
+    
+    # チーム分析メモ（概要&テクニカル）
+    with st.container(border=True):
+        st.subheader("📝 チーム分析メモ (概要&テクニカル)")
+        
+        # ユーザー名を取得
+        username = st.session_state.get('username', 'anonymous')
+        
+        # 保存された共有メモを読み込み
+        shared_memo_info = get_shared_memo(ticker, 'technical')
+        saved_memo = shared_memo_info.get("content", "")
+        last_author = shared_memo_info.get("author", "")
+        last_updated = shared_memo_info.get("updated_at", "")
+        
+        # 最終更新情報を表示
+        if last_updated:
+            st.caption(f"📅 最終更新: {last_updated} by {last_author}")
+        
+        # メモ入力エリア
+        memo_key = f"technical_memo_{ticker}"
+        if memo_key not in st.session_state:
+            st.session_state[memo_key] = saved_memo
+        
+        user_memo = st.text_area(
+            "テクニカル分析や株価動向の分析メモを記録（チーム共有）：",
+            value=st.session_state[memo_key],
+            height=150,
+            placeholder="""例：
+• RSIが70超えで過熱感、調整局面に注意
+• 移動平均線を上抜けて上昇トレンド継続
+• 出来高増加を伴う上昇で信頼性高い
+• レジスタンスライン突破で次のターゲットは○○円
+• ボラティリティ拡大でリスク管理要注意
+""",
+            key=f"technical_memo_input_{ticker}"
+        )
+        
+        # メモを保存
+        col_save, col_clear = st.columns([1, 1])
+        with col_save:
+            if st.button("💾 チーム分析メモを保存", key=f"save_technical_memo_{ticker}"):
+                st.session_state[memo_key] = user_memo
+                save_shared_memo(ticker, 'technical', user_memo, username)
+                st.success(f"✅ チーム分析メモを保存しました！({username})")
+        
+        # メモをクリア
+        with col_clear:
+            if st.button("🗑️ メモをクリア", key=f"clear_technical_memo_{ticker}"):
+                st.session_state[memo_key] = ""
+                save_shared_memo(ticker, 'technical', "", username)
+                st.rerun()
+
+def calculate_cagr(data_series, years):
+    """年平均成長率（CAGR）を計算"""
+    try:
+        if len(data_series) < years + 1:
+            return None
+        
+        start_value = data_series.iloc[-(years + 1)]
+        end_value = data_series.iloc[-1]
+        
+        # 値が無効またはゼロ以下の場合はNoneを返す
+        if pd.isna(start_value) or pd.isna(end_value) or start_value <= 0 or end_value <= 0:
+            return None
+        
+        cagr = ((end_value / start_value) ** (1 / years) - 1) * 100
+        
+        # 異常な値をチェック（±1000%を超える場合）
+        if abs(cagr) > 1000:
+            return None
+            
+        return cagr
+    except Exception as e:
+        print(f"CAGR計算エラー: {e}")
+        return None
+
+def calculate_yoy_growth(data_series):
+    """前年比成長率（YoY）を計算"""
+    try:
+        yoy_data = []
+        years = []
+        
+        for i in range(1, len(data_series)):
+            current_value = data_series.iloc[i]
+            previous_value = data_series.iloc[i-1]
+            
+            # 有効な値のみを処理
+            if (not pd.isna(current_value) and not pd.isna(previous_value) and 
+                previous_value > 0 and current_value >= 0):
+                yoy = ((current_value - previous_value) / previous_value) * 100
+                
+                # 異常な値をチェック（±1000%を超える場合は除外）
+                if abs(yoy) <= 1000:
+                    yoy_data.append(yoy)
+                    years.append(data_series.index[i])
+                else:
+                    yoy_data.append(None)
+                    years.append(data_series.index[i])
+            else:
+                yoy_data.append(None)
+                years.append(data_series.index[i])
+        
+        return yoy_data, years
+    except Exception as e:
+        print(f"YoY計算エラー: {e}")
+        return [], []
 
 def generate_financial_analysis_comments(fundamental_data, ticker):
     """財務データから自動的に分析コメントを生成"""
     try:
         comments = []
+        trend_data = {}  # トレンド分析データを格納
+        
         comments.append("**📊 財務データから読み取れる企業特徴:**\n")
         
         # 売上高分析
@@ -7194,6 +7347,19 @@ def generate_financial_analysis_comments(fundamental_data, ticker):
                     comments.append("  - 中堅企業規模（売上100億円台）")
                 else:
                     comments.append("  - 中小企業規模（売上100億円未満）")
+                
+                # CAGR計算
+                revenue_3y_cagr = calculate_cagr(revenue_data, 3)
+                revenue_5y_cagr = calculate_cagr(revenue_data, 5)
+                
+                # YoY成長率計算
+                revenue_yoy, revenue_years = calculate_yoy_growth(revenue_data)
+                
+                # トレンドデータに格納
+                trend_data['revenue_3y_cagr'] = revenue_3y_cagr
+                trend_data['revenue_5y_cagr'] = revenue_5y_cagr
+                trend_data['revenue_yoy'] = revenue_yoy
+                trend_data['revenue_years'] = revenue_years
         
         # 営業利益分析
         if '営業利益' in fundamental_data.columns and '売上高' in fundamental_data.columns:
@@ -7232,6 +7398,19 @@ def generate_financial_analysis_comments(fundamental_data, ticker):
                         comments.append(f"  - 利益成長率 {profit_growth:+.1f}% の堅調な成長 🔄")
                     else:
                         comments.append(f"  - 利益成長率 {profit_growth:+.1f}% の減益 📉")
+                
+                # CAGR計算
+                profit_3y_cagr = calculate_cagr(profit_data, 3)
+                profit_5y_cagr = calculate_cagr(profit_data, 5)
+                
+                # YoY成長率計算
+                profit_yoy, profit_years = calculate_yoy_growth(profit_data)
+                
+                # トレンドデータに格納
+                trend_data['profit_3y_cagr'] = profit_3y_cagr
+                trend_data['profit_5y_cagr'] = profit_5y_cagr
+                trend_data['profit_yoy'] = profit_yoy
+                trend_data['profit_years'] = profit_years
         
         # 時系列トレンド分析
         comments.append(f"\n• **トレンド分析**:")
@@ -7259,10 +7438,16 @@ def generate_financial_analysis_comments(fundamental_data, ticker):
                 else:
                     comments.append("  - 収益改善余地のある企業 ⚠️")
         
-        return "\n".join(comments)
+        return {
+            'comments': "\n".join(comments),
+            'trend_data': trend_data
+        }
         
     except Exception as e:
-        return f"**分析エラー**: 財務データの分析中にエラーが発生しました: {str(e)}"
+        return {
+            'comments': f"**分析エラー**: 財務データの分析中にエラーが発生しました: {str(e)}",
+            'trend_data': {}
+        }
 
 def render_fundamental_tab(ticker, stock_data, fundamental_data):
     """ファンダメンタル分析タブの表示"""
@@ -7278,18 +7463,34 @@ def render_fundamental_tab(ticker, stock_data, fundamental_data):
                 st.write("**📈 売上高推移**")
                 if '売上高' in fundamental_data.columns:
                     fig_revenue = go.Figure()
+                    revenue_data = fundamental_data['売上高'] / 1e2
+                    
+                    # 実績データをプロット
                     fig_revenue.add_trace(go.Scatter(
                         x=fundamental_data.index, 
-                        y=fundamental_data['売上高'] / 1e2, 
+                        y=revenue_data, 
                         mode='lines+markers',
                         name='売上高',
                         line=dict(color='blue', width=3),
                         marker=dict(size=6)
                     ))
+                    
+                    # トレンドラインを追加
+                    trend_x, trend_y = calculate_trend_line(fundamental_data.index, revenue_data)
+                    if trend_x is not None and trend_y is not None:
+                        fig_revenue.add_trace(go.Scatter(
+                            x=fundamental_data.index,
+                            y=trend_y,  # 既に億円換算済み
+                            mode='lines',
+                            name='トレンドライン',
+                            line=dict(color='gray', width=2, dash='dash'),
+                            opacity=0.7
+                        ))
+                    
                     fig_revenue.update_layout(
                         yaxis_title='売上高 (億円)',
                         height=300,
-                        title="売上高推移"
+                        title="📊 財務指標の推移（実績データ）"
                     )
                     st.plotly_chart(fig_revenue, use_container_width=True)
             
@@ -7297,14 +7498,30 @@ def render_fundamental_tab(ticker, stock_data, fundamental_data):
                 st.write("**💰 営業利益推移**")
                 if '営業利益' in fundamental_data.columns:
                     fig_profit = go.Figure()
+                    profit_data = fundamental_data['営業利益'] / 1e2
+                    
+                    # 実績データをプロット
                     fig_profit.add_trace(go.Scatter(
                         x=fundamental_data.index, 
-                        y=fundamental_data['営業利益'] / 1e2, 
+                        y=profit_data, 
                         mode='lines+markers',
                         name='営業利益',
                         line=dict(color='green', width=3),
                         marker=dict(size=6)
                     ))
+                    
+                    # トレンドラインを追加
+                    trend_x, trend_y = calculate_trend_line(fundamental_data.index, profit_data)
+                    if trend_x is not None and trend_y is not None:
+                        fig_profit.add_trace(go.Scatter(
+                            x=fundamental_data.index,
+                            y=trend_y,  # 既に億円換算済み
+                            mode='lines',
+                            name='トレンドライン',
+                            line=dict(color='gray', width=2, dash='dash'),
+                            opacity=0.7
+                        ))
+                    
                     fig_profit.update_layout(
                         yaxis_title='営業利益 (億円)',
                         height=300,
@@ -7372,6 +7589,98 @@ def render_fundamental_tab(ticker, stock_data, fundamental_data):
             st.subheader('🔮 業績予想入力')
             render_forecast_input(ticker, fundamental_data)
         
+        # 成長トレンド分析セクション
+        with st.container(border=True):
+            st.subheader('📈 成長トレンド分析')
+            
+            # 財務データから分析結果を取得
+            analysis_result = generate_financial_analysis_comments(fundamental_data, ticker)
+            trend_data = analysis_result.get('trend_data', {})
+            
+            # CAGRの表示
+            st.write("**📊 年平均成長率（CAGR）**")
+            col_cagr1, col_cagr2, col_cagr3, col_cagr4 = st.columns(4)
+            
+            with col_cagr1:
+                revenue_3y_cagr = trend_data.get('revenue_3y_cagr')
+                if revenue_3y_cagr is not None:
+                    cagr_color = "normal" if revenue_3y_cagr > 0 else "inverse"
+                    st.metric("売上高 3年CAGR", f"{revenue_3y_cagr:+.1f}%", delta_color=cagr_color)
+                else:
+                    st.metric("売上高 3年CAGR", "N/A", help="データ不足")
+            
+            with col_cagr2:
+                profit_3y_cagr = trend_data.get('profit_3y_cagr')
+                if profit_3y_cagr is not None:
+                    cagr_color = "normal" if profit_3y_cagr > 0 else "inverse"
+                    st.metric("営業利益 3年CAGR", f"{profit_3y_cagr:+.1f}%", delta_color=cagr_color)
+                else:
+                    st.metric("営業利益 3年CAGR", "N/A", help="データ不足")
+            
+            with col_cagr3:
+                revenue_5y_cagr = trend_data.get('revenue_5y_cagr')
+                if revenue_5y_cagr is not None:
+                    cagr_color = "normal" if revenue_5y_cagr > 0 else "inverse"
+                    st.metric("売上高 5年CAGR", f"{revenue_5y_cagr:+.1f}%", delta_color=cagr_color)
+                else:
+                    st.metric("売上高 5年CAGR", "N/A", help="データ不足")
+            
+            with col_cagr4:
+                profit_5y_cagr = trend_data.get('profit_5y_cagr')
+                if profit_5y_cagr is not None:
+                    cagr_color = "normal" if profit_5y_cagr > 0 else "inverse"
+                    st.metric("営業利益 5年CAGR", f"{profit_5y_cagr:+.1f}%", delta_color=cagr_color)
+                else:
+                    st.metric("営業利益 5年CAGR", "N/A", help="データ不足")
+            
+            # YoY成長率の推移
+            st.markdown("---")
+            st.write("**📈 前年比成長率（YoY）の推移**")
+            
+            col_yoy1, col_yoy2 = st.columns(2)
+            
+            with col_yoy1:
+                revenue_yoy = trend_data.get('revenue_yoy', [])
+                revenue_years = trend_data.get('revenue_years', [])
+                if revenue_yoy and revenue_years and len(revenue_yoy) == len(revenue_years):
+                    try:
+                        yoy_df = pd.DataFrame({
+                            'Year': revenue_years,
+                            'Revenue_YoY': revenue_yoy
+                        })
+                        yoy_df = yoy_df.dropna()
+                        if not yoy_df.empty:
+                            st.write("**売上高 YoY成長率**")
+                            st.bar_chart(yoy_df.set_index('Year')['Revenue_YoY'])
+                        else:
+                            st.info("売上高のYoYデータが不足しています")
+                    except Exception as e:
+                        st.error(f"売上高YoYチャート作成エラー: {e}")
+                        st.info("売上高のYoYデータに問題があります")
+                else:
+                    st.info("売上高のYoYデータが不足しています")
+            
+            with col_yoy2:
+                profit_yoy = trend_data.get('profit_yoy', [])
+                profit_years = trend_data.get('profit_years', [])
+                if profit_yoy and profit_years and len(profit_yoy) == len(profit_years):
+                    try:
+                        yoy_df = pd.DataFrame({
+                            'Year': profit_years,
+                            'Profit_YoY': profit_yoy
+                        })
+                        yoy_df = yoy_df.dropna()
+                        if not yoy_df.empty:
+                            st.write("**営業利益 YoY成長率**")
+                            st.bar_chart(yoy_df.set_index('Year')['Profit_YoY'])
+                        else:
+                            st.info("営業利益のYoYデータが不足しています")
+                    except Exception as e:
+                        st.error(f"営業利益YoYチャート作成エラー: {e}")
+                        st.info("営業利益のYoYデータに問題があります")
+                else:
+                    st.info("営業利益のYoYデータが不足しています")
+        
         # 財務データテーブル
         with st.container(border=True):
             st.subheader('📋 財務データ詳細')
@@ -7380,7 +7689,7 @@ def render_fundamental_tab(ticker, stock_data, fundamental_data):
             # 財務データ自動分析コメント
             st.markdown("---")
             st.subheader('🤖 AI分析コメント')
-            auto_analysis = generate_financial_analysis_comments(fundamental_data, ticker)
+            auto_analysis = analysis_result.get('comments', 'データの分析に失敗しました。')
             st.markdown(auto_analysis)
             
             # ユーザー編集可能な分析メモ
@@ -7438,8 +7747,11 @@ def render_fundamental_tab(ticker, stock_data, fundamental_data):
         st.info("💡 このティッカーのファンダメンタルデータは利用できません。")
     
     # バリュエーション指標の解説セクション
-    with st.expander("主要なバリュエーション指標の解説 💡"):
+    with st.expander("主要なバリュエーション指標の解説（実績ベース計算）💡"):
         st.markdown("""
+        **⚠️ 注意**: 以下の指標は最新の実績財務データと現在株価に基づいて計算されています。
+        将来予想に基づく指標とは異なりますのでご注意ください。
+        
         ### 📈 PER（株価収益率 / Price Earnings Ratio）
         
         **定義**: 株価が1株当たり純利益の何倍かを示す指標
