@@ -5290,6 +5290,79 @@ def get_available_financial_tickers():
         tickers.append(ticker)
     return sorted(tickers)
 
+def get_valuation_metrics(ticker_info, fundamental_data):
+    """
+    バリュエーション指標を取得・計算する関数
+    
+    Args:
+        ticker_info (dict): yf.Ticker.info オブジェクト
+        fundamental_data (pd.DataFrame): 財務CSVのDataFrame
+    
+    Returns:
+        dict: バリュエーション指標の辞書
+    """
+    metrics = {}
+    
+    try:
+        # PER (株価収益率)
+        per = ticker_info.get('trailingPE')
+        if per is None or per <= 0:
+            per = ticker_info.get('forwardPE')
+        metrics['PER'] = per if per and per > 0 else None
+        
+        # PBR (株価純資産倍率)
+        pbr = ticker_info.get('priceToBook')
+        metrics['PBR'] = pbr if pbr and pbr > 0 else None
+        
+        # ROE (自己資本利益率)
+        roe = ticker_info.get('returnOnEquity')
+        
+        # ROEをパーセント表示に変換（yfinanceは小数で返すことが多い）
+        if roe is not None and roe > 0:
+            if roe < 1:  # 小数の場合はパーセントに変換
+                roe = roe * 100
+        
+        # ROEが取得できない場合は財務データから計算
+        if (roe is None or roe <= 0) and fundamental_data is not None and not fundamental_data.empty:
+            try:
+                # 実際のデータがある最新年度を取得（NaNでない行を探す）
+                for i in range(len(fundamental_data) - 1, -1, -1):
+                    latest_data = fundamental_data.iloc[i]
+                    net_income = latest_data.get('当期利益')
+                    equity = latest_data.get('自己資本')
+                    
+                    # NaNでない有効なデータが見つかった場合
+                    if (net_income is not None and not pd.isna(net_income) and 
+                        equity is not None and not pd.isna(equity) and equity > 0):
+                        roe = (net_income / equity) * 100  # パーセント表示
+                        break
+            except (IndexError, KeyError, TypeError):
+                pass
+        
+        metrics['ROE'] = roe if roe is not None and roe > 0 else None
+        
+        # 配当利回り
+        dividend_yield = ticker_info.get('dividendYield')
+        if dividend_yield is not None and dividend_yield > 0:
+            # yfinanceの配当利回りは既にパーセント形式の場合が多いので、調整
+            if dividend_yield > 1:  # 1より大きい場合は既にパーセント
+                dividend_yield = dividend_yield
+            else:  # 1以下の場合は小数なのでパーセントに変換
+                dividend_yield = dividend_yield * 100
+        metrics['配当利回り'] = dividend_yield if dividend_yield is not None and dividend_yield > 0 else None
+        
+    except Exception as e:
+        print(f"バリュエーション指標の計算中にエラーが発生しました: {e}")
+        # エラーが発生した場合はすべてNoneで初期化
+        metrics = {
+            'PER': None,
+            'PBR': None,
+            'ROE': None,
+            '配当利回り': None
+        }
+    
+    return metrics
+
 def create_integrated_analysis(ticker, stock_data, ticker_info, fundamental_data=None):
     """統合分析ページ"""
     company_name = get_japanese_company_name(ticker, ticker_info)
