@@ -10,6 +10,7 @@ import os
 import hashlib
 import itertools
 import warnings
+import json
 
 # 警告を非表示にする
 warnings.filterwarnings('ignore', category=FutureWarning, module='yfinance')
@@ -55,6 +56,78 @@ def save_user_data(users):
     with open(user_file, 'w', encoding='utf-8') as f:
         for username, password_hash in users.items():
             f.write(f"{username}:{password_hash}\n")
+
+def load_memo_data():
+    """メモデータをファイルから読み込み"""
+    memo_file = "memo_data.json"
+    try:
+        if os.path.exists(memo_file):
+            with open(memo_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"Warning: Failed to load memo_data.json: {e}")
+    return {}
+
+def save_memo_data(memo_data):
+    """メモデータをファイルに保存"""
+    memo_file = "memo_data.json"
+    try:
+        with open(memo_file, 'w', encoding='utf-8') as f:
+            json.dump(memo_data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"Warning: Failed to save memo_data.json: {e}")
+
+def save_user_memo(username, ticker, memo_type, memo_content):
+    """ユーザーのメモを保存"""
+    memo_data = load_memo_data()
+    
+    if username not in memo_data:
+        memo_data[username] = {}
+    if ticker not in memo_data[username]:
+        memo_data[username][ticker] = {}
+    
+    memo_data[username][ticker][memo_type] = memo_content
+    save_memo_data(memo_data)
+
+def get_user_memo(username, ticker, memo_type):
+    """ユーザーのメモを取得"""
+    memo_data = load_memo_data()
+    try:
+        return memo_data.get(username, {}).get(ticker, {}).get(memo_type, "")
+    except:
+        return ""
+
+def save_shared_memo(ticker, memo_type, memo_content, author):
+    """共有メモを保存（投資チーム用）"""
+    memo_data = load_memo_data()
+    
+    # 共有メモセクション
+    if "shared" not in memo_data:
+        memo_data["shared"] = {}
+    if ticker not in memo_data["shared"]:
+        memo_data["shared"][ticker] = {}
+    
+    # メモの内容と作成者、更新日時を保存
+    memo_data["shared"][ticker][memo_type] = {
+        "content": memo_content,
+        "author": author,
+        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+    
+    save_memo_data(memo_data)
+
+def get_shared_memo(ticker, memo_type):
+    """共有メモを取得"""
+    memo_data = load_memo_data()
+    try:
+        memo_info = memo_data.get("shared", {}).get(ticker, {}).get(memo_type, {})
+        if isinstance(memo_info, dict) and "content" in memo_info:
+            return memo_info
+        else:
+            # 古い形式の場合は空の構造を返す
+            return {"content": "", "author": "", "updated_at": ""}
+    except:
+        return {"content": "", "author": "", "updated_at": ""}
 
 def update_password(username, new_password):
     """パスワードを更新"""
@@ -6352,14 +6425,49 @@ def create_integrated_analysis(ticker, stock_data, ticker_info, fundamental_data
     else:
         st.info("財務データが利用できないため、予想値設定はできません。")
     
-    # 投資メモ
-    st.subheader("📝 統合分析メモ")
+    # 投資メモ（チーム共有）
+    st.subheader("📝 チーム統合分析メモ (全員で共有)")
+    
+    # ユーザー名を取得
+    username = st.session_state.get('username', 'anonymous')
+    
+    # 保存された共有メモを読み込み
+    shared_summary_info = get_shared_memo(ticker, 'summary')
+    saved_summary_memo = shared_summary_info.get("content", "")
+    last_author = shared_summary_info.get("author", "")
+    last_updated = shared_summary_info.get("updated_at", "")
+    
+    # 最終更新情報を表示
+    if last_author and last_updated:
+        st.caption(f"📅 最終更新: {last_updated} by {last_author}")
+    
+    # セッションステートでメモを管理
+    summary_memo_key = f"summary_memo_{ticker}"
+    if summary_memo_key not in st.session_state:
+        st.session_state[summary_memo_key] = saved_summary_memo
+    
     investment_memo = st.text_area(
-        "統合分析に基づく投資判断の根拠",
+        "統合分析に基づく投資判断の根拠（チーム共有）",
+        value=st.session_state[summary_memo_key],
         placeholder="テクニカル分析とファンダメンタル分析の結果を総合した投資判断と根拠を記録...",
         height=100,
-        key=f"summary_memo_{ticker}"
+        key=f"summary_memo_input_{ticker}"
     )
+    
+    # メモ保存ボタン
+    col_save_summary, col_clear_summary = st.columns([1, 1])
+    
+    with col_save_summary:
+        if st.button("💾 チーム統合メモを保存", key=f"save_summary_memo_{ticker}"):
+            st.session_state[summary_memo_key] = investment_memo
+            save_shared_memo(ticker, 'summary', investment_memo, username)
+            st.success(f"✅ チーム統合分析メモを保存しました！({username})")
+    
+    with col_clear_summary:
+        if st.button("🗑️ メモをクリア", key=f"clear_summary_memo_{ticker}"):
+            st.session_state[summary_memo_key] = ""
+            save_shared_memo(ticker, 'summary', "", username)
+            st.rerun()
     
     # 詳細ファンダメンタル分析
     if fundamental_data is not None:
@@ -7277,16 +7385,29 @@ def render_fundamental_tab(ticker, stock_data, fundamental_data):
             
             # ユーザー編集可能な分析メモ
             st.markdown("---")
-            st.subheader('📝 あなたの分析メモ (編集可能)')
+            st.subheader('📝 チーム投資分析メモ (全員で共有)')
+            
+            # ユーザー名を取得
+            username = st.session_state.get('username', 'anonymous')
+            
+            # 保存された共有メモを読み込み
+            shared_memo_info = get_shared_memo(ticker, 'fundamental')
+            saved_memo = shared_memo_info.get("content", "")
+            last_author = shared_memo_info.get("author", "")
+            last_updated = shared_memo_info.get("updated_at", "")
+            
+            # 最終更新情報を表示
+            if last_author and last_updated:
+                st.caption(f"📅 最終更新: {last_updated} by {last_author}")
             
             # セッションステートでメモを管理
             memo_key = f"financial_memo_{ticker}"
             if memo_key not in st.session_state:
-                st.session_state[memo_key] = ""
+                st.session_state[memo_key] = saved_memo
             
             # テキストエリアで編集可能なメモ
             user_memo = st.text_area(
-                "財務データから読み取れる企業の特徴や投資判断をメモしてください：",
+                "財務データから読み取れる企業の特徴や投資判断をメモしてください（チーム共有）：",
                 value=st.session_state[memo_key],
                 height=200,
                 placeholder="""例：
@@ -7300,15 +7421,18 @@ def render_fundamental_tab(ticker, stock_data, fundamental_data):
             )
             
             # メモを保存
-            if st.button("💾 分析メモを保存", key=f"save_fundamental_memo_{ticker}"):
-                st.session_state[memo_key] = user_memo
-                st.success("✅ 分析メモを保存しました！")
+            col_save, col_clear = st.columns([1, 1])
+            with col_save:
+                if st.button("💾 チーム分析メモを保存", key=f"save_fundamental_memo_{ticker}"):
+                    st.session_state[memo_key] = user_memo
+                    save_shared_memo(ticker, 'fundamental', user_memo, username)
+                    st.success(f"✅ チーム分析メモを保存しました！({username})")
             
             # メモをクリア
-            col_clear1, col_clear2 = st.columns([1, 4])
-            with col_clear1:
+            with col_clear:
                 if st.button("🗑️ メモをクリア", key=f"clear_fundamental_memo_{ticker}"):
                     st.session_state[memo_key] = ""
+                    save_shared_memo(ticker, 'fundamental', "", username)
                     st.rerun()
     else:
         st.info("💡 このティッカーのファンダメンタルデータは利用できません。")
@@ -7717,20 +7841,48 @@ def render_investment_tab(ticker, stock_data, ticker_info, fundamental_data):
             if st.button(f"🔴 {ticker} 売り推奨", key=f"investment_sell_{ticker}", use_container_width=True):
                 st.error(f"{company_name} を売り推奨として記録")
     
-    # 投資メモ
+    # 投資メモ（チーム共有）
     with st.container(border=True):
-        st.subheader("📝 投資分析メモ")
+        st.subheader("📝 チーム投資判断メモ (全員で共有)")
+        
+        # ユーザー名を取得
+        username = st.session_state.get('username', 'anonymous')
+        
+        # 保存された共有メモを読み込み
+        shared_investment_info = get_shared_memo(ticker, 'investment')
+        saved_investment_memo = shared_investment_info.get("content", "")
+        last_author = shared_investment_info.get("author", "")
+        last_updated = shared_investment_info.get("updated_at", "")
+        
+        # 最終更新情報を表示
+        if last_author and last_updated:
+            st.caption(f"📅 最終更新: {last_updated} by {last_author}")
+        
         memo_key = f"investment_memo_{ticker}"
+        if memo_key not in st.session_state:
+            st.session_state[memo_key] = saved_investment_memo
         
         investment_memo = st.text_area(
-            "投資判断の根拠やメモを記録:",
+            "投資判断の根拠やメモを記録（チーム共有）:",
+            value=st.session_state[memo_key],
             height=150,
-            key=memo_key,
+            key=f"investment_memo_input_{ticker}",
             placeholder="テクニカル分析とファンダメンタル分析の結果を総合した投資判断と根拠を記録..."
         )
         
-        if st.button("💾 メモを保存", key=f"save_investment_memo_{ticker}"):
-            st.success("投資メモが保存されました！")
+        col_save, col_clear = st.columns([1, 1])
+        
+        with col_save:
+            if st.button("💾 チーム投資メモを保存", key=f"save_investment_memo_{ticker}"):
+                st.session_state[memo_key] = investment_memo
+                save_shared_memo(ticker, 'investment', investment_memo, username)
+                st.success(f"✅ チーム投資メモが保存されました！({username})")
+        
+        with col_clear:
+            if st.button("🗑️ メモをクリア", key=f"clear_investment_memo_{ticker}"):
+                st.session_state[memo_key] = ""
+                save_shared_memo(ticker, 'investment', "", username)
+                st.rerun()
 
 def render_technical_signals(stock_data):
     """テクニカルシグナルの表示"""

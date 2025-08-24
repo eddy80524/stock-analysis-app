@@ -44,5 +44,8 @@ Thumbs.db
 # User data (if contains sensitive info)
 user_data.txt
 
+# User memos
+memo_data.json
+
 # Logs
 *.log
