@@ -6725,6 +6725,89 @@ def render_summary_tab(ticker, stock_data, ticker_info, fundamental_data):
             else:
                 st.metric("💼 営業利益", "データなし")
     
+    # バリュエーション指標セクション
+    with st.container(border=True):
+        st.subheader('📊 バリュエーション指標')
+        
+        # バリュエーション指標を取得
+        valuation_metrics = get_valuation_metrics(ticker_info, fundamental_data)
+        
+        col_val1, col_val2, col_val3, col_val4 = st.columns(4)
+        
+        with col_val1:
+            per_value = valuation_metrics.get('PER')
+            if per_value is not None:
+                # PER評価（一般的な目安：15倍が標準）
+                if per_value < 10:
+                    per_delta = "割安"
+                    per_delta_color = "normal"
+                elif per_value < 20:
+                    per_delta = "標準"
+                    per_delta_color = "off"
+                else:
+                    per_delta = "割高"
+                    per_delta_color = "inverse"
+                st.metric("📈 PER", f"{per_value:.1f}倍", per_delta, delta_color=per_delta_color)
+            else:
+                st.metric("📈 PER", "データなし")
+        
+        with col_val2:
+            pbr_value = valuation_metrics.get('PBR')
+            if pbr_value is not None:
+                # PBR評価（一般的な目安：1倍が理論値）
+                if pbr_value < 0.8:
+                    pbr_delta = "割安"
+                    pbr_delta_color = "normal"
+                elif pbr_value < 1.5:
+                    pbr_delta = "標準"
+                    pbr_delta_color = "off"
+                else:
+                    pbr_delta = "割高"
+                    pbr_delta_color = "inverse"
+                st.metric("📊 PBR", f"{pbr_value:.2f}倍", pbr_delta, delta_color=pbr_delta_color)
+            else:
+                st.metric("📊 PBR", "データなし")
+        
+        with col_val3:
+            roe_value = valuation_metrics.get('ROE')
+            if roe_value is not None:
+                # ROE評価（一般的な目安：8%以上が良好）
+                if roe_value >= 15:
+                    roe_delta = "優秀"
+                    roe_delta_color = "normal"
+                elif roe_value >= 8:
+                    roe_delta = "良好"
+                    roe_delta_color = "normal"
+                elif roe_value >= 5:
+                    roe_delta = "標準"
+                    roe_delta_color = "off"
+                else:
+                    roe_delta = "低水準"
+                    roe_delta_color = "inverse"
+                st.metric("💼 ROE", f"{roe_value:.1f}%", roe_delta, delta_color=roe_delta_color)
+            else:
+                st.metric("💼 ROE", "データなし")
+        
+        with col_val4:
+            dividend_yield = valuation_metrics.get('配当利回り')
+            if dividend_yield is not None:
+                # 配当利回り評価（一般的な目安：3%以上が高配当）
+                if dividend_yield >= 4:
+                    div_delta = "高配当"
+                    div_delta_color = "normal"
+                elif dividend_yield >= 2:
+                    div_delta = "標準"
+                    div_delta_color = "off"
+                elif dividend_yield > 0:
+                    div_delta = "低配当"
+                    div_delta_color = "inverse"
+                else:
+                    div_delta = "無配"
+                    div_delta_color = "inverse"
+                st.metric("💰 配当利回り", f"{dividend_yield:.2f}%", div_delta, delta_color=div_delta_color)
+            else:
+                st.metric("💰 配当利回り", "データなし")
+    
     # チャート表示
     col_chart1, col_chart2 = st.columns(2)
     
