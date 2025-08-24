@@ -6500,12 +6500,24 @@ def render_main_dashboard(all_data, ticker_info_dict, fundamental_data_dict, mar
                         latest_profit = actual_data['営業利益'].dropna().iloc[-1] if not actual_data['営業利益'].dropna().empty else 0
                         profit = latest_profit / 1e2 if latest_profit > 0 else 0
             
+            # バリュエーション指標（PER, PBR）
+            ticker_info = ticker_info_dict.get(ticker, {})
+            per_value = ticker_info.get('trailingPE')
+            if per_value is None or per_value <= 0:
+                per_value = ticker_info.get('forwardPE')
+            per_display = f"{per_value:.2f}" if per_value and per_value > 0 else "N/A"
+            
+            pbr_value = ticker_info.get('priceToBook')
+            pbr_display = f"{pbr_value:.2f}" if pbr_value and pbr_value > 0 else "N/A"
+            
             summary_data.append({
                 '銘柄コード': ticker,
                 '企業名': company_name,
                 '最新株価(¥)': f"{latest_price:,.0f}",
                 '前日比(%)': f"{change_pct:+.2f}",
                 'RSI': f"{rsi:.1f}",
+                'PER': per_display,
+                'PBR': pbr_display,
                 '売上高(億円)': f"{revenue:.1f}" if revenue > 0 else "N/A",
                 '営業利益(億円)': f"{profit:.1f}" if profit > 0 else "N/A",
                 'アクション': '詳細分析'
