@@ -6749,6 +6749,10 @@ def render_detail_page(ticker, stock_data, ticker_info, fundamental_data):
     """個別銘柄詳細ページの表示"""
     company_name = get_japanese_company_name(ticker, ticker_info)
     
+    # テクニカル指標が存在しない場合は計算
+    if 'MACD' not in stock_data.columns:
+        stock_data = calculate_technicals(stock_data)
+    
     # ヘッダー
     col_header1, col_header2 = st.columns([3, 1])
     with col_header1:
@@ -7646,7 +7650,7 @@ def render_factor_summary(price_factors):
     
     with col_summary1:
         st.write("**主要テクニカル要因**")
-        technical_counts = pd.Series(all_technical).value_counts()
+        technical_counts = pd.Series(all_technical, dtype='object').value_counts() if all_technical else pd.Series([], dtype='object')
         if not technical_counts.empty:
             for factor, count in technical_counts.head(3).items():
                 st.write(f"• {factor} ({count}回)")
@@ -7655,7 +7659,7 @@ def render_factor_summary(price_factors):
     
     with col_summary2:
         st.write("**主要ファンダメンタル要因**")
-        fundamental_counts = pd.Series(all_fundamental).value_counts()
+        fundamental_counts = pd.Series(all_fundamental, dtype='object').value_counts() if all_fundamental else pd.Series([], dtype='object')
         if not fundamental_counts.empty:
             for factor, count in fundamental_counts.head(3).items():
                 st.write(f"• {factor} ({count}回)")
@@ -7664,7 +7668,7 @@ def render_factor_summary(price_factors):
     
     with col_summary3:
         st.write("**主要業界要因**")
-        sector_counts = pd.Series(all_sector).value_counts()
+        sector_counts = pd.Series(all_sector, dtype='object').value_counts() if all_sector else pd.Series([], dtype='object')
         if not sector_counts.empty:
             for factor, count in sector_counts.head(3).items():
                 st.write(f"• {factor} ({count}回)")
