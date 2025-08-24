@@ -37,9 +37,10 @@ def load_user_data():
         users = {}
         with open(user_file, 'r', encoding='utf-8') as f:
             for line in f:
-                if ':' in line:
-                    username, password_hash = line.strip().split(':', 1)
-                    users[username] = password_hash
+                line = line.strip()  # 前後の空白文字を削除
+                if ':' in line and line:  # 空行もチェック
+                    username, password_hash = line.split(':', 1)
+                    users[username.strip()] = password_hash.strip()  # 空白文字を削除
         return users
     return USERS.copy()
 
