@@ -2,6 +2,7 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
 import numpy as np
 import re
@@ -5100,13 +5101,29 @@ def calculate_technicals(df):
     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
     rs = gain / loss.replace(0, np.nan)
     df['RSI'] = 100 - (100 / (1 + rs))
+    
+    # MACD計算
+    ema12 = df['Close'].ewm(span=12).mean()
+    ema26 = df['Close'].ewm(span=26).mean()
+    df['MACD'] = ema12 - ema26
+    df['MACD_Signal'] = df['MACD'].ewm(span=9).mean()
+    df['MACD_Histogram'] = df['MACD'] - df['MACD_Signal']
+    
     return df
 
 def create_candlestick_chart(df, ticker_symbol, company_name):
-    """ローソク足チャートを作成"""
-    fig = go.Figure()
+    """ローソク足チャートを作成（出来高付き）"""
+    # サブプロットを作成（2行1列、高さ比率は7:3）
+    fig = make_subplots(
+        rows=2, cols=1,
+        row_heights=[0.7, 0.3],
+        vertical_spacing=0.05,
+        subplot_titles=('株価', '出来高'),
+        shared_xaxes=True
+    )
     
     try:
+        # 価格チャート（上部）
         if not df.empty and all(col in df.columns for col in ['Open', 'High', 'Low', 'Close']):
             fig.add_trace(go.Candlestick(
                 x=df.index, 
@@ -5117,7 +5134,7 @@ def create_candlestick_chart(df, ticker_symbol, company_name):
                 name='ローソク足',
                 increasing_line_color='red',
                 decreasing_line_color='blue'
-            ))
+            ), row=1, col=1)
         else:
             fig.add_trace(go.Scatter(
                 x=df.index, 
@@ -5125,7 +5142,7 @@ def create_candlestick_chart(df, ticker_symbol, company_name):
                 mode='lines', 
                 name='終値', 
                 line=dict(color='black', width=2)
-            ))
+            ), row=1, col=1)
     except Exception as e:
         fig.add_trace(go.Scatter(
             x=df.index, 
@@ -5133,9 +5150,9 @@ def create_candlestick_chart(df, ticker_symbol, company_name):
             mode='lines', 
             name='終値', 
             line=dict(color='black', width=2)
-        ))
+        ), row=1, col=1)
     
-    # 移動平均線
+    # 移動平均線（上部）
     if 'MA25' in df.columns:
         fig.add_trace(go.Scatter(
             x=df.index, 
@@ -5143,7 +5160,7 @@ def create_candlestick_chart(df, ticker_symbol, company_name):
             mode='lines', 
             name='25日移動平均線', 
             line=dict(color='orange', width=1)
-        ))
+        ), row=1, col=1)
     
     if 'MA75' in df.columns:
         fig.add_trace(go.Scatter(
@@ -5152,15 +5169,42 @@ def create_candlestick_chart(df, ticker_symbol, company_name):
             mode='lines', 
             name='75日移動平均線', 
             line=dict(color='skyblue', width=1)
-        ))
+        ), row=1, col=1)
     
+    # 出来高チャート（下部）
+    if 'Volume' in df.columns:
+        # 価格の前日比で色を決定
+        colors = []
+        for i in range(len(df)):
+            if i == 0:
+                colors.append('gray')
+            else:
+                if df['Close'].iloc[i] >= df['Close'].iloc[i-1]:
+                    colors.append('red')  # 上昇
+                else:
+                    colors.append('blue')  # 下落
+        
+        fig.add_trace(go.Bar(
+            x=df.index,
+            y=df['Volume'],
+            name='出来高',
+            marker_color=colors,
+            opacity=0.7
+        ), row=2, col=1)
+    
+    # レイアウト設定
     fig.update_layout(
         title=f'{company_name} ({ticker_symbol}) 株価チャート', 
-        yaxis_title='株価 (JPY)', 
         xaxis_rangeslider_visible=False,
-        xaxis_title='日付',
-        showlegend=True
+        showlegend=True,
+        height=600
     )
+    
+    # Y軸のタイトル設定
+    fig.update_yaxes(title_text="株価 (JPY)", row=1, col=1)
+    fig.update_yaxes(title_text="出来高", row=2, col=1)
+    fig.update_xaxes(title_text="日付", row=2, col=1)
+    
     return fig
 
 def create_rsi_chart(df, ticker_symbol):
@@ -5170,6 +5214,65 @@ def create_rsi_chart(df, ticker_symbol):
     fig.add_hline(y=70, line_dash="dot", line_color="red", annotation_text="買われすぎ (70%)", annotation_position="bottom right")
     fig.add_hline(y=30, line_dash="dot", line_color="green", annotation_text="売られすぎ (30%)", annotation_position="bottom right")
     fig.update_layout(title=f'{ticker_symbol} RSI (14日間)', yaxis_title='RSI', yaxis=dict(range=[0, 100]))
+    return fig
+
+def create_macd_chart(df, ticker_symbol):
+    """MACDチャートを作成"""
+    fig = go.Figure()
+    
+    # MACDデータが存在するかチェック
+    if 'MACD' not in df.columns or 'MACD_Signal' not in df.columns or 'MACD_Histogram' not in df.columns:
+        fig.add_annotation(
+            text="MACDデータが計算されていません",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, showarrow=False,
+            font=dict(size=16)
+        )
+        fig.update_layout(
+            title=f'{ticker_symbol} MACD (データなし)',
+            xaxis_title='日付',
+            yaxis_title='MACD'
+        )
+        return fig
+    
+    # MACDライン
+    fig.add_trace(go.Scatter(
+        x=df.index, 
+        y=df['MACD'], 
+        mode='lines', 
+        name='MACD', 
+        line=dict(color='blue', width=2)
+    ))
+    
+    # シグナルライン
+    fig.add_trace(go.Scatter(
+        x=df.index, 
+        y=df['MACD_Signal'], 
+        mode='lines', 
+        name='Signal', 
+        line=dict(color='red', width=2)
+    ))
+    
+    # MACDヒストグラム
+    colors = ['green' if x >= 0 else 'red' for x in df['MACD_Histogram']]
+    fig.add_trace(go.Bar(
+        x=df.index, 
+        y=df['MACD_Histogram'], 
+        name='Histogram', 
+        marker_color=colors,
+        opacity=0.6
+    ))
+    
+    # ゼロライン
+    fig.add_hline(y=0, line_dash="dot", line_color="gray")
+    
+    fig.update_layout(
+        title=f'{ticker_symbol} MACD (12,26,9)',
+        yaxis_title='MACD',
+        xaxis_title='日付',
+        legend=dict(x=0, y=1)
+    )
+    
     return fig
 
 def create_rolling_volatility_chart(df, ticker_symbol, window=30):
@@ -6837,6 +6940,13 @@ def render_summary_tab(ticker, stock_data, ticker_info, fundamental_data):
             fig_rsi.update_layout(height=500)
             st.plotly_chart(fig_rsi, use_container_width=True)
     
+    # MACDチャート（フルワイドで表示）
+    with st.container(border=True):
+        st.subheader('📈 MACD分析')
+        fig_macd = create_macd_chart(stock_data, ticker)
+        fig_macd.update_layout(height=400)
+        st.plotly_chart(fig_macd, use_container_width=True)
+    
     # ボラティリティ分析セクション
     st.markdown("---")
     with st.container(border=True):
@@ -7038,14 +7148,15 @@ def generate_financial_analysis_comments(fundamental_data, ticker):
 def render_fundamental_tab(ticker, stock_data, fundamental_data):
     """ファンダメンタル分析タブの表示"""
     if fundamental_data is not None and not fundamental_data.empty:
-        # 財務推移チャート
+        # 財務推移チャート（2行2列レイアウト）
         with st.container(border=True):
             st.subheader('💹 財務指標推移')
             
+            # 1行目
             col_fund1, col_fund2 = st.columns(2)
             
             with col_fund1:
-                st.write("**売上高推移**")
+                st.write("**📈 売上高推移**")
                 if '売上高' in fundamental_data.columns:
                     fig_revenue = go.Figure()
                     fig_revenue.add_trace(go.Scatter(
@@ -7053,16 +7164,18 @@ def render_fundamental_tab(ticker, stock_data, fundamental_data):
                         y=fundamental_data['売上高'] / 1e2, 
                         mode='lines+markers',
                         name='売上高',
-                        line=dict(color='blue', width=3)
+                        line=dict(color='blue', width=3),
+                        marker=dict(size=6)
                     ))
                     fig_revenue.update_layout(
                         yaxis_title='売上高 (億円)',
-                        height=300
+                        height=300,
+                        title="売上高推移"
                     )
                     st.plotly_chart(fig_revenue, use_container_width=True)
             
             with col_fund2:
-                st.write("**営業利益推移**")
+                st.write("**💰 営業利益推移**")
                 if '営業利益' in fundamental_data.columns:
                     fig_profit = go.Figure()
                     fig_profit.add_trace(go.Scatter(
@@ -7070,13 +7183,70 @@ def render_fundamental_tab(ticker, stock_data, fundamental_data):
                         y=fundamental_data['営業利益'] / 1e2, 
                         mode='lines+markers',
                         name='営業利益',
-                        line=dict(color='green', width=3)
+                        line=dict(color='green', width=3),
+                        marker=dict(size=6)
                     ))
                     fig_profit.update_layout(
                         yaxis_title='営業利益 (億円)',
-                        height=300
+                        height=300,
+                        title="営業利益推移"
                     )
                     st.plotly_chart(fig_profit, use_container_width=True)
+            
+            # 2行目
+            col_fund3, col_fund4 = st.columns(2)
+            
+            with col_fund3:
+                st.write("**📊 営業利益率推移**")
+                if '営業利益' in fundamental_data.columns and '売上高' in fundamental_data.columns:
+                    # 営業利益率を計算
+                    operating_margin = (fundamental_data['営業利益'] / fundamental_data['売上高'] * 100).dropna()
+                    
+                    fig_margin = go.Figure()
+                    fig_margin.add_trace(go.Scatter(
+                        x=operating_margin.index, 
+                        y=operating_margin, 
+                        mode='lines+markers',
+                        name='営業利益率',
+                        line=dict(color='orange', width=3),
+                        marker=dict(size=6)
+                    ))
+                    fig_margin.update_layout(
+                        yaxis_title='営業利益率 (%)',
+                        height=300,
+                        title="営業利益率推移"
+                    )
+                    # 5%ラインを追加（参考ライン）
+                    fig_margin.add_hline(y=5, line_dash="dot", line_color="gray", 
+                                        annotation_text="5% (参考ライン)")
+                    st.plotly_chart(fig_margin, use_container_width=True)
+            
+            with col_fund4:
+                st.write("**💎 売上総利益率推移**")
+                if '売上総利益' in fundamental_data.columns and '売上高' in fundamental_data.columns:
+                    # 粗利率を計算
+                    gross_margin = (fundamental_data['売上総利益'] / fundamental_data['売上高'] * 100).dropna()
+                    
+                    fig_gross = go.Figure()
+                    fig_gross.add_trace(go.Scatter(
+                        x=gross_margin.index, 
+                        y=gross_margin, 
+                        mode='lines+markers',
+                        name='売上総利益率',
+                        line=dict(color='purple', width=3),
+                        marker=dict(size=6)
+                    ))
+                    fig_gross.update_layout(
+                        yaxis_title='売上総利益率 (%)',
+                        height=300,
+                        title="売上総利益率推移"
+                    )
+                    # 30%ラインを追加（参考ライン）
+                    fig_gross.add_hline(y=30, line_dash="dot", line_color="gray", 
+                                      annotation_text="30% (参考ライン)")
+                    st.plotly_chart(fig_gross, use_container_width=True)
+                else:
+                    st.info("売上総利益のデータが利用できません")
         
         # 予想値入力セクション
         with st.container(border=True):
