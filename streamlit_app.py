@@ -19,12 +19,12 @@ USERS = {
     "admin": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",  # "password"
     "user1": "fcf730b6d95236ecd3c9fc2d92d7b6b2bb061514961aec041d6c7a7192f592e4",  # "secret123"
     "demo": "2a97516c354b68848cdbd8f54a226a0a55b21ed138e207ad6c5cbb9c00aa5aea",   # "demo"
-    "eddy80524": "15e2b0d3c33891ebb0f1ef609ec419420c20e320ce94c65fbc8c3312448eb225",  # "123456789"
+    "eddy80524": "0629b5bbe5b20488128f363b38237cfbfeb0fa02ee06f4e3deb095dc5909db38",  # custom password
     "aoto7043": "15e2b0d3c33891ebb0f1ef609ec419420c20e320ce94c65fbc8c3312448eb225",   # "123456789"
     "yu-ado43": "15e2b0d3c33891ebb0f1ef609ec419420c20e320ce94c65fbc8c3312448eb225",   # "123456789"
     "seita": "15e2b0d3c33891ebb0f1ef609ec419420c20e320ce94c65fbc8c3312448eb225",      # "123456789"
-    "tdckenta": "15e2b0d3c33891ebb0f1ef609ec419420c20e320ce94c65fbc8c3312448eb225",    # "123456789"
     "yiuka3555": "15e2b0d3c33891ebb0f1ef609ec419420c20e320ce94c65fbc8c3312448eb225",   # "123456789"
+    "tdckenta": "15e2b0d3c33891ebb0f1ef609ec419420c20e320ce94c65fbc8c3312448eb225",    # "123456789"
 }
 
 # 初回ログインパスワードのハッシュ
@@ -33,15 +33,20 @@ INITIAL_PASSWORD_HASH = "15e2b0d3c33891ebb0f1ef609ec419420c20e320ce94c65fbc8c331
 def load_user_data():
     """ユーザーデータをファイルから読み込み"""
     user_file = "user_data.txt"
-    if os.path.exists(user_file):
-        users = {}
-        with open(user_file, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()  # 前後の空白文字を削除
-                if ':' in line and line:  # 空行もチェック
-                    username, password_hash = line.split(':', 1)
-                    users[username.strip()] = password_hash.strip()  # 空白文字を削除
-        return users
+    try:
+        if os.path.exists(user_file):
+            users = {}
+            with open(user_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()  # 前後の空白文字を削除
+                    if ':' in line and line:  # 空行もチェック
+                        username, password_hash = line.split(':', 1)
+                        users[username.strip()] = password_hash.strip()  # 空白文字を削除
+            return users
+    except Exception as e:
+        print(f"Warning: Failed to load user_data.txt: {e}")
+    
+    # ファイルが存在しないか読み込みに失敗した場合はUSERS定数を使用
     return USERS.copy()
 
 def save_user_data(users):
